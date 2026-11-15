@@ -11,7 +11,11 @@ import com.github.bhlangonijr.chesslib.move.Move
  * The recognizer reports what it sees; this class only ever commits a *legal* move, and only after
  * several consecutive frames agree on it.
  */
-class MoveTracker(startFen: String? = null) {
+class MoveTracker(
+    startFen: String? = null,
+    assumeReady: Boolean = false,                 // true: skip waiting for the starting position
+    private val confirmFrames: Int = CONFIRM_FRAMES,
+) {
 
     val board = Board().also { if (startFen != null) it.loadFromFen(startFen) }
 
@@ -20,7 +24,7 @@ class MoveTracker(startFen: String? = null) {
     private var pending: Move? = null
     private var pendingCount = 0
     private var readyCount = 0
-    var ready = false
+    var ready = assumeReady
         private set
 
     sealed interface Result {
@@ -37,7 +41,7 @@ class MoveTracker(startFen: String? = null) {
         if (!ready) {
             // Wait until the board looks like the expected starting position.
             if (mismatches(seen, board) <= SETUP_TOLERANCE) readyCount++ else readyCount = 0
-            if (readyCount >= CONFIRM_FRAMES) { ready = true; return Result.BoardConfirmed }
+            if (readyCount >= confirmFrames) { ready = true; return Result.BoardConfirmed }
             return Result.Nothing
         }
 
@@ -58,7 +62,7 @@ class MoveTracker(startFen: String? = null) {
             return Result.Nothing
         }
         if (best == pending) pendingCount++ else { pending = best; pendingCount = 1 }
-        if (pendingCount < CONFIRM_FRAMES) return Result.Nothing
+        if (pendingCount < confirmFrames) return Result.Nothing
 
         val mover = board.sideToMove
         board.doMove(best)

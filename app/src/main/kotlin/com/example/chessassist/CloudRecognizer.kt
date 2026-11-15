@@ -38,18 +38,27 @@ class CloudRecognizer(private val apiKey: String, private val model: String) : B
     override fun recognize(boardImage: Bitmap, flipped: Boolean): Map<Square, Piece> {
         // Show the model the board from White's side: turn the photo 180° if we sit on Black's side.
         val upright = if (flipped) boardImage.rotate180() else boardImage
-        val reply = ask(upright)
+        val reply = ask(upright, PROMPT)
         return parsePlacement(reply)
     }
 
-    private fun ask(img: Bitmap): String {
-        val scaled = Bitmap.createScaledBitmap(img, 768, 768, true)
+    /** For screenshots: finds a board anywhere on screen. Returns null when no board is visible. */
+    fun recognizeScreen(screenshot: Bitmap): Map<Square, Piece>? {
+        val reply = ask(screenshot, SCREEN_PROMPT)
+        return if (FEN_REGEX.containsMatchIn(reply)) parsePlacement(reply)
+        else if (reply.contains("NONE", ignoreCase = true)) null
+        else error("No FEN in reply: ${reply.take(80)}")
+    }
+
+    private fun ask(img: Bitmap, prompt: String): String {
+        val k = minOf(1f, 1024f / maxOf(img.width, img.height))
+        val scaled = Bitmap.createScaledBitmap(img, (img.width * k).toInt(), (img.height * k).toInt(), true)
         val bos = ByteArrayOutputStream()
         scaled.compress(Bitmap.CompressFormat.JPEG, 85, bos)
         val b64 = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
 
         val content = JSONArray()
-            .put(JSONObject().put("type", "text").put("text", PROMPT))
+            .put(JSONObject().put("type", "text").put("text", prompt))
             .put(JSONObject().put("type", "image_url")
                 .put("image_url", JSONObject().put("url", "data:image/jpeg;base64,$b64")))
         val body = JSONObject()
@@ -86,9 +95,34 @@ class CloudRecognizer(private val apiKey: String, private val model: String) : B
             "from rank 8 down to rank 1, for example rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR. " +
             "Uppercase = White, lowercase = Black, digits = empty squares. No other text."
 
+        private const val SCREEN_PROMPT =
+            "This is a screenshot. If it shows a chess board (a chess app, website or video), reply with ONLY " +
+            "the piece-placement field of the FEN for the position on that board, from rank 8 down to rank 1, " +
+            "using real board coordinates (use the a-h / 1-8 labels if visible; if the board is shown flipped, " +
+            "still report real ranks and files). Uppercase = White, lowercase = Black, digits = empty squares. " +
+            "If no chess board is visible, reply exactly: NONE"
+
+        private val FEN_REGEX = Regex("""([1-8pnbrqkPNBRQK]+/){7}[1-8pnbrqkPNBRQK]+""")
+
+        /** Inverse of [parsePlacement]: piece map to the first FEN field. */
+        fun placement(m: Map<Square, Piece>): String =
+            (7 downTo 0).joinToString("/") { rank ->
+                val sb = StringBuilder()
+                var empty = 0
+                for (file in 0..7) {
+                    val p = m[Square.squareAt(rank * 8 + file)]
+                    if (p == null || p == Piece.NONE) { empty++ } else {
+                        if (empty > 0) { sb.append(empty); empty = 0 }
+                        sb.append(p.fenSymbol)
+                    }
+                }
+                if (empty > 0) sb.append(empty)
+                sb.toString()
+            }
+
         /** Parses "rnbqkbnr/pppppppp/8/..." (first FEN field) into squares. Throws if malformed. */
         fun parsePlacement(reply: String): Map<Square, Piece> {
-            val match = Regex("""([1-8pnbrqkPNBRQK]+/){7}[1-8pnbrqkPNBRQK]+""").find(reply)
+            val match = FEN_REGEX.find(reply)
                 ?: error("No FEN in reply: ${reply.take(80)}")
             val ranks = match.value.split("/")
             val out = HashMap<Square, Piece>()

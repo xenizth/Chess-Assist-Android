@@ -1,7 +1,12 @@
 package com.example.chessassist
 
 import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionManager
+import android.os.Build
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.os.Bundle
@@ -57,6 +62,23 @@ private fun Screen(vm: GameViewModel) {
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
     LaunchedEffect(Unit) { if (!granted) launcher.launch(Manifest.permission.CAMERA) }
 
+    // Screen mode: ask for notification permission (Android 13+), then for screen capture, then start the service.
+    val screenLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        val data = r.data
+        if (r.resultCode == Activity.RESULT_OK && data != null) {
+            val i = Intent(ctx, ScreenService::class.java)
+                .putExtra("code", r.resultCode)
+                .putExtra("data", data)
+                .putExtra("white", state.playingWhite)
+            ContextCompat.startForegroundService(ctx, i)
+        }
+    }
+    val startScreen = {
+        val mpm = ctx.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        screenLauncher.launch(mpm.createScreenCaptureIntent())
+    }
+    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> startScreen() }
+
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
             if (granted) CameraWithGuide(onFrame = vm::onFrame, intervalMs = { vm.frameIntervalMs })
@@ -75,6 +97,15 @@ private fun Screen(vm: GameViewModel) {
         }
 
         if (!state.running) {
+            OutlinedButton(
+                onClick = {
+                    if (Build.VERSION.SDK_INT >= 33 &&
+                        ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                    ) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) else startScreen()
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Screen mode: watch this phone's screen (needs OpenRouter key)") }
+
             var key by remember { mutableStateOf(vm.apiKey) }
             var model by remember { mutableStateOf(vm.model) }
             OutlinedTextField(
