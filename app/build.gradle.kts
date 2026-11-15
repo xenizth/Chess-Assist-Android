@@ -52,7 +52,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
 
     implementation("org.tensorflow:tensorflow-lite:2.14.0")
-    implementation("com.github.bhlangonijr:chesslib:1.3.4")
+    // JitPack builds this from the GitHub repo. master-SNAPSHOT always resolves; pin a real tag later.
+    implementation("com.github.bhlangonijr:chesslib:master-SNAPSHOT")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
     testImplementation("junit:junit:4.13.2")
