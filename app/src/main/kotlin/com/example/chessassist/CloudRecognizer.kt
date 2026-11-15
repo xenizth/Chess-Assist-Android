@@ -46,8 +46,8 @@ class CloudRecognizer(private val apiKey: String, private val model: String) : B
     fun recognizeScreen(screenshot: Bitmap): Map<Square, Piece>? {
         val reply = ask(screenshot, SCREEN_PROMPT)
         return if (FEN_REGEX.containsMatchIn(reply)) parsePlacement(reply)
-        else if (reply.contains("NONE", ignoreCase = true)) null
-        else error("No FEN in reply: ${reply.take(80)}")
+        else if (NONE_REGEX.containsMatchIn(reply)) null
+        else error("No FEN in reply (…${reply.takeLast(80)})")
     }
 
     private fun ask(img: Bitmap, prompt: String): String {
@@ -64,7 +64,8 @@ class CloudRecognizer(private val apiKey: String, private val model: String) : B
         val body = JSONObject()
             .put("model", model)
             .put("temperature", 0)
-            .put("max_tokens", 1500)
+            .put("max_tokens", 4000)
+            .put("reasoning", JSONObject().put("effort", "low"))  // ignored by models without reasoning
             .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", content)))
 
         val conn = (URL("https://openrouter.ai/api/v1/chat/completions").openConnection() as HttpURLConnection).apply {
@@ -91,16 +92,19 @@ class CloudRecognizer(private val apiKey: String, private val model: String) : B
     companion object {
         private const val PROMPT =
             "This is a photo of a physical chess board seen from White's side (White at the bottom). " +
-            "Reply with ONLY the piece-placement field of the FEN for the position you see, " +
-            "from rank 8 down to rank 1, for example rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR. " +
-            "Uppercase = White, lowercase = Black, digits = empty squares. No other text."
+            "Give the piece-placement field of the FEN for the position you see, from rank 8 down to rank 1. " +
+            "Uppercase = White, lowercase = Black, digits = empty squares. Do not explain. " +
+            "Your final line must be exactly: FEN: <placement>"
 
         private const val SCREEN_PROMPT =
-            "This is a screenshot. If it shows a chess board (a chess app, website or video), reply with ONLY " +
-            "the piece-placement field of the FEN for the position on that board, from rank 8 down to rank 1, " +
+            "This is a screenshot. If it shows a chess board (a chess app, website or video), give the " +
+            "piece-placement field of the FEN for the position on that board, from rank 8 down to rank 1, " +
             "using real board coordinates (use the a-h / 1-8 labels if visible; if the board is shown flipped, " +
             "still report real ranks and files). Uppercase = White, lowercase = Black, digits = empty squares. " +
-            "If no chess board is visible, reply exactly: NONE"
+            "Do not explain. Your final line must be exactly: FEN: <placement>. " +
+            "If no chess board is visible, your final line must be exactly: FEN: NONE"
+
+        private val NONE_REGEX = Regex("""FEN:\s*NONE""", RegexOption.IGNORE_CASE)
 
         private val FEN_REGEX = Regex("""([1-8pnbrqkPNBRQK]+/){7}[1-8pnbrqkPNBRQK]+""")
 
@@ -122,8 +126,9 @@ class CloudRecognizer(private val apiKey: String, private val model: String) : B
 
         /** Parses "rnbqkbnr/pppppppp/8/..." (first FEN field) into squares. Throws if malformed. */
         fun parsePlacement(reply: String): Map<Square, Piece> {
-            val match = FEN_REGEX.find(reply)
-                ?: error("No FEN in reply: ${reply.take(80)}")
+            // Use the LAST match: thinking models may mention other placements while reasoning.
+            val match = FEN_REGEX.findAll(reply).lastOrNull()
+                ?: error("No FEN in reply (…${reply.takeLast(80)})")
             val ranks = match.value.split("/")
             val out = HashMap<Square, Piece>()
             for ((i, rankText) in ranks.withIndex()) {
