@@ -18,6 +18,8 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,6 +31,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -54,9 +57,9 @@ private fun Screen(vm: GameViewModel) {
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
     LaunchedEffect(Unit) { if (!granted) launcher.launch(Manifest.permission.CAMERA) }
 
-    Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
-            if (granted) CameraWithGuide(onFrame = vm::onFrame)
+            if (granted) CameraWithGuide(onFrame = vm::onFrame, intervalMs = { vm.frameIntervalMs })
             else Text("Camera permission needed", Modifier.align(Alignment.Center))
         }
 
@@ -71,13 +74,29 @@ private fun Screen(vm: GameViewModel) {
             else Button(onClick = vm::start, enabled = granted) { Text("Start") }
         }
 
+        if (!state.running) {
+            var key by remember { mutableStateOf(vm.apiKey) }
+            var model by remember { mutableStateOf(vm.model) }
+            OutlinedTextField(
+                value = key, onValueChange = { key = it; vm.apiKey = it },
+                label = { Text("OpenRouter API key (blank = use on-device model)") },
+                singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = model, onValueChange = { model = it; vm.model = it },
+                label = { Text("Vision model") },
+                singleLine = true, modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
         BoardWithArrow(state.suggestionUci, flipped = !state.playingWhite, modifier = Modifier.fillMaxWidth().aspectRatio(1f))
     }
 }
 
 /** Camera preview with a square frame; the analyzer crops to the frame's area (center square). */
 @Composable
-private fun CameraWithGuide(onFrame: (Bitmap) -> Unit) {
+private fun CameraWithGuide(onFrame: (Bitmap) -> Unit, intervalMs: () -> Long) {
     val ctx = LocalContext.current
     val owner = LocalLifecycleOwner.current
     val executor = remember { Executors.newSingleThreadExecutor() }
@@ -95,7 +114,7 @@ private fun CameraWithGuide(onFrame: (Bitmap) -> Unit) {
                     .build()
                 analysis.setAnalyzer(executor) { proxy ->
                     val now = System.currentTimeMillis()
-                    if (now - last >= 1000) { last = now; onFrame(proxy.toSquareBitmap()) }
+                    if (now - last >= intervalMs()) { last = now; onFrame(proxy.toSquareBitmap()) }
                     proxy.close()
                 }
                 provider.unbindAll()

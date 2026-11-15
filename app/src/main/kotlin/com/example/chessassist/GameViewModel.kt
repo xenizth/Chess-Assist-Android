@@ -33,6 +33,17 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
     private var tracker: MoveTracker? = null
     private val speaker = Speaker(app)
     private val busy = AtomicBoolean(false)
+    private val settings = Settings(app)
+
+    var apiKey: String
+        get() = settings.apiKey
+        set(v) { settings.apiKey = v }
+    var model: String
+        get() = settings.model
+        set(v) { settings.model = v }
+
+    /** Cloud calls are slower and rate-limited, so look less often. */
+    val frameIntervalMs: Long get() = if (settings.apiKey.isNotBlank()) 3000L else 1000L
 
     fun setColor(white: Boolean) { if (!_state.value.running) _state.value = _state.value.copy(playingWhite = white) }
 
@@ -42,7 +53,10 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    recognizer = TfliteBoardRecognizer(getApplication())
+                    recognizer = if (settings.apiKey.isNotBlank())
+                        CloudRecognizer(settings.apiKey, settings.model)
+                    else
+                        TfliteBoardRecognizer(getApplication())
                     engine = UciEngine(getApplication()).also { it.start() }
                 }
                 tracker = MoveTracker()
