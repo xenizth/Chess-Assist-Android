@@ -50,14 +50,24 @@ object MovePhrase {
 }
 
 class Speaker(context: Context) {
-    private var ready = false
-    private val tts: TextToSpeech = TextToSpeech(context) { status ->
-        if (status == TextToSpeech.SUCCESS) { tts.language = Locale.US; ready = true }
+    @Volatile private var ready = false
+    private var tts: TextToSpeech? = null
+
+    init {
+        tts = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts?.language = Locale.US
+                ready = true
+            }
+        }
     }
 
     fun say(text: String) {
-        if (ready) tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "move")
+        if (ready) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "move")
     }
 
-    fun shutdown() { tts.stop(); tts.shutdown() }
+    fun shutdown() {
+        tts?.stop()
+        tts?.shutdown()
+    }
 }
