@@ -1,0 +1,49 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+
+      # Build Stockfish for Android arm64 with the NDK on the runner, unless you
+      # already committed app/src/main/jniLibs/arm64-v8a/libstockfish.so yourself.
+      - name: Build Stockfish (arm64)
+        if: hashFiles('app/src/main/jniLibs/arm64-v8a/libstockfish.so') == ''
+        continue-on-error: true
+        run: |
+          set -e
+          NDK="$ANDROID_NDK_LATEST_HOME"
+          [ -d "$NDK" ] || { sdkmanager "ndk;27.1.12297006" >/dev/null; NDK="$ANDROID_HOME/ndk/27.1.12297006"; }
+          export PATH="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          git clone --depth 1 --branch sf_17.1 https://github.com/official-stockfish/Stockfish.git
+          cd Stockfish/src
+          make -j"$(nproc)" net
+          make -j"$(nproc)" build ARCH=armv8 COMP=ndk
+          mkdir -p "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a"
+          cp stockfish "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libstockfish.so"
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chess-assist-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
