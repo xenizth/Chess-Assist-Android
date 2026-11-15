@@ -55,7 +55,7 @@ class CloudRecognizer(private val apiKey: String, private val model: String) : B
         val body = JSONObject()
             .put("model", model)
             .put("temperature", 0)
-            .put("max_tokens", 150)
+            .put("max_tokens", 1500)
             .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", content)))
 
         val conn = (URL("https://openrouter.ai/api/v1/chat/completions").openConnection() as HttpURLConnection).apply {
@@ -71,8 +71,12 @@ class CloudRecognizer(private val apiKey: String, private val model: String) : B
         val code = conn.responseCode
         val text = (if (code in 200..299) conn.inputStream else conn.errorStream)?.bufferedReader()?.use { it.readText() } ?: ""
         if (code !in 200..299) error("OpenRouter HTTP $code: ${text.take(200)}")
-        return JSONObject(text).getJSONArray("choices").getJSONObject(0)
-            .getJSONObject("message").getString("content")
+        val msg = JSONObject(text).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+        fun field(name: String): String = msg.optString(name, "").let { if (it == "null") "" else it }
+        // Some "thinking" models put their answer in `reasoning` and leave `content` empty.
+        val out = field("content").ifBlank { field("reasoning") }
+        if (out.isBlank()) error("Empty reply from $model. It may not support images; try another vision model.")
+        return out
     }
 
     companion object {
